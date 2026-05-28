@@ -23,28 +23,6 @@ const DNS_RCODES: Record<number, string> = {
   5: 'REFUSED',
 }
 
-const DNS_QTYPES: Record<string, number> = {
-  A: 1, NS: 2, CNAME: 5, MX: 15, TXT: 16, AAAA: 28,
-}
-
-function buildDnsWireQuery(hostname: string, qtype: string): string {
-  const type = DNS_QTYPES[qtype.toUpperCase()] ?? 1
-  const parts = hostname.replace(/\.$/, '').split('.')
-  const labels: number[] = []
-  for (const part of parts) {
-    labels.push(part.length)
-    for (let i = 0; i < part.length; i++) labels.push(part.charCodeAt(i))
-  }
-  labels.push(0)
-  const buf = new Uint8Array(12 + labels.length + 4)
-  buf[2] = 0x01; buf[3] = 0x00
-  buf[5] = 1
-  buf.set(labels, 12)
-  const off = 12 + labels.length
-  buf[off] = (type >> 8) & 0xff; buf[off + 1] = type & 0xff
-  buf[off + 3] = 1
-  return btoa(String.fromCharCode(...buf)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
 
 interface WireResult { rcode: number; answers: string[] }
 
