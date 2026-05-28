@@ -58,13 +58,11 @@ class ShimStatement {
   }
 
   async raw<T = unknown[]>(options?: { columnNames?: boolean }): Promise<T[]> {
-    this.stmt.raw(true)
-    const rows = (
-      this.values.length ? this.stmt.all(...this.values) : this.stmt.all()
-    ) as T[]
-    this.stmt.raw(false)
+    const s = this.db.prepare(this.sql)
+    s.raw(true)
+    const rows = (this.values.length ? s.all(...this.values) : s.all()) as T[]
     if (options?.columnNames) {
-      const cols = this.stmt.columns().map((c) => c.name)
+      const cols = s.columns().map((c) => c.name)
       return [cols as unknown as T, ...rows]
     }
     return rows

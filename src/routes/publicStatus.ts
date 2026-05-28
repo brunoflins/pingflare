@@ -1,10 +1,28 @@
 import { Hono } from 'hono'
-import { eq, desc, and, gte, inArray } from 'drizzle-orm'
+import { eq, desc, and, gte, inArray, sql } from 'drizzle-orm'
 import { getDb, statusPages, statusPageMonitors, monitors, statusLogs, incidents, incidentReports, incidentUpdates, incidentMonitors } from '../db'
 import { verifyPassword } from '../utils'
 import type { Env } from '../index'
 
 const router = new Hono<{ Bindings: Env }>()
+
+async function getDailyStats(
+  db: ReturnType<typeof getDb>,
+  monitorIds: string[],
+  since90d: number,
+) {
+  if (monitorIds.length === 0) return []
+  const dayExpr = sql<string>`strftime('%Y-%m-%d', datetime(${statusLogs.checkedAt}, 'unixepoch'))`
+  return db.select({
+    monitorId: statusLogs.monitorId,
+    day: dayExpr.as('day'),
+    ups: sql<number>`SUM(CASE WHEN ${statusLogs.status} = 'up' THEN 1 ELSE 0 END)`.as('ups'),
+    total: sql<number>`COUNT(*)`.as('total'),
+  })
+    .from(statusLogs)
+    .where(and(inArray(statusLogs.monitorId, monitorIds), gte(statusLogs.checkedAt, since90d)))
+    .groupBy(statusLogs.monitorId, dayExpr)
+}
 
 router.get('/:slug', async (c) => {
   const db = getDb(c.env.DB)
@@ -54,27 +72,30 @@ router.get('/:slug', async (c) => {
 
   const now = Math.floor(Date.now() / 1000)
   const since90d = now - 90 * 86400
-  const allLogs = await db.select().from(statusLogs).where(
-    and(inArray(statusLogs.monitorId, monitorIds), gte(statusLogs.checkedAt, since90d))
-  )
+
+  const dailyRows = await getDailyStats(db, monitorIds, since90d)
+
+  const daysByMonitor: Record<string, Record<string, { ups: number; total: number }>> = {}
+  const uptimeByMonitor: Record<string, { ups: number; total: number }> = {}
+
+  for (const row of dailyRows) {
+    if (!daysByMonitor[row.monitorId]) daysByMonitor[row.monitorId] = {}
+    daysByMonitor[row.monitorId][row.day] = { ups: row.ups, total: row.total }
+
+    if (!uptimeByMonitor[row.monitorId]) uptimeByMonitor[row.monitorId] = { ups: 0, total: 0 }
+    uptimeByMonitor[row.monitorId].ups += row.ups
+    uptimeByMonitor[row.monitorId].total += row.total
+  }
 
   const monitorData = monitorRows.map(m => {
-    const logs = allLogs.filter(l => l.monitorId === m.id)
-    const upLogs = logs.filter(l => l.status === 'up')
-    const uptime90d = logs.length > 0 ? Math.round((upLogs.length / logs.length) * 10000) / 100 : null
-
-    const dayMap: Record<string, { total: number; ups: number }> = {}
-    for (const log of logs) {
-      const day = new Date(log.checkedAt * 1000).toISOString().slice(0, 10)
-      if (!dayMap[day]) dayMap[day] = { total: 0, ups: 0 }
-      dayMap[day].total++
-      if (log.status === 'up') dayMap[day].ups++
-    }
+    const days = daysByMonitor[m.id] ?? {}
+    const agg = uptimeByMonitor[m.id]
+    const uptime90d = agg ? Math.round((agg.ups / agg.total) * 10000) / 100 : null
 
     const daily = []
     for (let i = 89; i >= 0; i--) {
       const d = new Date((now - i * 86400) * 1000).toISOString().slice(0, 10)
-      const e = dayMap[d]
+      const e = days[d]
       daily.push({ date: d, uptime: e ? Math.round((e.ups / e.total) * 1000) / 10 : null })
     }
 
@@ -107,6 +128,7 @@ router.get('/:slug', async (c) => {
     }
   }
 
+  c.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60')
   return c.json({
     page: { name: page.name, description: page.description, protected: !!page.passwordHash },
     monitors: monitorData,
@@ -144,18 +166,25 @@ router.get('/:slug/monitors/:monitorId', async (c) => {
 
   const now = Math.floor(Date.now() / 1000)
   const since90d = now - 90 * 86400
+  const dayExpr = sql<string>`strftime('%Y-%m-%d', datetime(${statusLogs.checkedAt}, 'unixepoch'))`
 
-  const allLogs = await db.select().from(statusLogs)
+  const dailyAgg = await db.select({
+    day: dayExpr.as('day'),
+    ups: sql<number>`SUM(CASE WHEN ${statusLogs.status} = 'up' THEN 1 ELSE 0 END)`.as('ups'),
+    total: sql<number>`COUNT(*)`.as('total'),
+  })
+    .from(statusLogs)
     .where(and(eq(statusLogs.monitorId, monitorId), gte(statusLogs.checkedAt, since90d)))
-    .orderBy(desc(statusLogs.checkedAt))
+    .groupBy(dayExpr)
 
-  const dayMap: Record<string, { total: number; ups: number }> = {}
-  for (const log of allLogs) {
-    const day = new Date(log.checkedAt * 1000).toISOString().slice(0, 10)
-    if (!dayMap[day]) dayMap[day] = { total: 0, ups: 0 }
-    dayMap[day].total++
-    if (log.status === 'up') dayMap[day].ups++
+  const dayMap: Record<string, { ups: number; total: number }> = {}
+  let totalUps = 0, totalAll = 0
+  for (const row of dailyAgg) {
+    dayMap[row.day] = { ups: row.ups, total: row.total }
+    totalUps += row.ups
+    totalAll += row.total
   }
+
   const daily = []
   for (let i = 89; i >= 0; i--) {
     const d = new Date((now - i * 86400) * 1000).toISOString().slice(0, 10)
@@ -163,23 +192,34 @@ router.get('/:slug/monitors/:monitorId', async (c) => {
     daily.push({ date: d, uptime: e ? Math.round((e.ups / e.total) * 1000) / 10 : null })
   }
 
-  function uptimeFor(sinceSecs: number): number | null {
-    const rows = allLogs.filter(l => l.checkedAt >= sinceSecs)
-    if (!rows.length) return null
-    return Math.round((rows.filter(l => l.status === 'up').length / rows.length) * 10000) / 100
-  }
+  const since24h = now - 86400
+  const logs24h = await db.select()
+    .from(statusLogs)
+    .where(and(eq(statusLogs.monitorId, monitorId), gte(statusLogs.checkedAt, since24h)))
+    .orderBy(desc(statusLogs.checkedAt))
 
-  const logs24h = allLogs.filter(l => l.checkedAt >= now - 86400)
   const withTime = logs24h.filter(l => l.responseTimeMs !== null)
   const avgResponseMs = withTime.length > 0
     ? Math.round(withTime.reduce((s, l) => s + l.responseTimeMs!, 0) / withTime.length)
     : null
+
+  async function uptimeFor(sinceSecs: number): Promise<number | null> {
+    const [agg] = await db.select({
+      ups: sql<number>`SUM(CASE WHEN ${statusLogs.status} = 'up' THEN 1 ELSE 0 END)`.as('ups'),
+      total: sql<number>`COUNT(*)`.as('total'),
+    })
+      .from(statusLogs)
+      .where(and(eq(statusLogs.monitorId, monitorId), gte(statusLogs.checkedAt, sinceSecs)))
+    if (!agg || !agg.total) return null
+    return Math.round((agg.ups / agg.total) * 10000) / 100
+  }
 
   const monitorIncidents = await db.select().from(incidents)
     .where(eq(incidents.monitorId, monitorId))
     .orderBy(desc(incidents.startedAt))
     .limit(20)
 
+  c.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60')
   return c.json({
     name: monitor.name,
     type: monitor.type,
@@ -187,13 +227,13 @@ router.get('/:slug/monitors/:monitorId', async (c) => {
     tags: monitor.tags,
     lastStatus: monitor.lastStatus,
     lastCheckedAt: monitor.lastCheckedAt,
-    uptime1: uptimeFor(now - 86400),
-    uptime7: uptimeFor(now - 7 * 86400),
-    uptime30: uptimeFor(now - 30 * 86400),
-    uptime90: uptimeFor(since90d),
+    uptime1: await uptimeFor(since24h),
+    uptime7: await uptimeFor(now - 7 * 86400),
+    uptime30: await uptimeFor(now - 30 * 86400),
+    uptime90: totalAll > 0 ? Math.round((totalUps / totalAll) * 10000) / 100 : null,
     avgResponseMs,
     daily,
-    logs: allLogs.slice(0, 200).map(l => ({
+    logs: logs24h.slice(0, 200).map(l => ({
       checkedAt: l.checkedAt,
       status: l.status,
       responseTimeMs: l.responseTimeMs,

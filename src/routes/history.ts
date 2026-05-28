@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { eq, desc, and, gte, count } from 'drizzle-orm'
+import { eq, desc, and, gte, count, sql } from 'drizzle-orm'
 import { getDb, statusLogs, incidents, monitors } from '../db'
 import { requireAuth } from '../middleware/auth'
 import type { Env } from '../index'
@@ -55,16 +55,16 @@ router.get('/:id/uptime', async (c) => {
   const days = Number(c.req.query('days') ?? 90)
   const since = Math.floor(Date.now() / 1000) - days * 86400
 
-  const rows = await db.select()
+  const [agg] = await db.select({
+    ups: sql<number>`SUM(CASE WHEN ${statusLogs.status} = 'up' THEN 1 ELSE 0 END)`.as('ups'),
+    total: count(),
+  })
     .from(statusLogs)
     .where(and(eq(statusLogs.monitorId, id), gte(statusLogs.checkedAt, since)))
 
-  if (rows.length === 0) return c.json({ uptime: null, days })
+  if (!agg || !agg.total) return c.json({ uptime: null, days })
 
-  const up = rows.filter(r => r.status === 'up').length
-  const uptime = (up / rows.length) * 100
-
-  return c.json({ uptime: Math.round(uptime * 100) / 100, days, total: rows.length, up })
+  return c.json({ uptime: Math.round((agg.ups / agg.total) * 10000) / 100, days, total: agg.total, up: agg.ups })
 })
 
 router.get('/:id/daily', async (c) => {
@@ -76,18 +76,19 @@ router.get('/:id/daily', async (c) => {
 
   const now = Math.floor(Date.now() / 1000)
   const since = now - days * 86400
+  const dayExpr = sql<string>`strftime('%Y-%m-%d', datetime(${statusLogs.checkedAt}, 'unixepoch'))`
 
-  const allRows = await db.select()
+  const rows = await db.select({
+    day: dayExpr.as('day'),
+    ups: sql<number>`SUM(CASE WHEN ${statusLogs.status} = 'up' THEN 1 ELSE 0 END)`.as('ups'),
+    total: sql<number>`COUNT(*)`.as('total'),
+  })
     .from(statusLogs)
     .where(and(eq(statusLogs.monitorId, id), gte(statusLogs.checkedAt, since)))
+    .groupBy(dayExpr)
 
-  const dayMap: Record<string, { total: number; ups: number }> = {}
-  for (const row of allRows) {
-    const day = new Date(row.checkedAt * 1000).toISOString().slice(0, 10)
-    if (!dayMap[day]) dayMap[day] = { total: 0, ups: 0 }
-    dayMap[day].total++
-    if (row.status === 'up') dayMap[day].ups++
-  }
+  const dayMap: Record<string, { ups: number; total: number }> = {}
+  for (const row of rows) dayMap[row.day] = { ups: row.ups, total: row.total }
 
   const result: { date: string; uptime: number | null }[] = []
   for (let i = days - 1; i >= 0; i--) {
