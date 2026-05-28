@@ -35,6 +35,9 @@ jobs:
       - name: 🔎 Type-check backend
         run: npx tsc --noEmit
 
+      - name: 🧪 Run tests
+        run: npm test
+
       - name: 🛡️ Audit backend dependencies
         run: npm audit --audit-level=high
 

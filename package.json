@@ -18,7 +18,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply pingflare --local",
     "db:migrate:remote": "wrangler d1 migrations apply pingflare",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.0",
@@ -39,6 +41,7 @@
     "tsup": "^8.4.0",
     "tsx": "^4.19.4",
     "typescript": "^6.0.3",
+    "vitest": "^4.1.7",
     "wrangler": "^4.90.0"
   }
 }
