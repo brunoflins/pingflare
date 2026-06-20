@@ -32,10 +32,6 @@ Two deployment modes are supported:
 
 > **Recommended:** Fork this repository to your own GitHub account. This gives you full control over updates, pull upstream changes whenever you want, and Cloudflare deploys automatically from your fork on every push.
 
-> **Quick start:** Use the button below to deploy instantly from the current version of this repository. Note that this won't receive future updates automatically.
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/butialabs/pingflare)
-
 ### 1. Create the D1 database
 
 1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **Storage & Database > D1 SQL Database**
@@ -64,12 +60,22 @@ Click **Deployments > Retry deploy** (or push any commit). On the first request,
 
 Your dashboard will be live at `https://pingflare.<your-subdomain>.workers.dev`.
 
+### Free Tier Limits
+
+When running on Cloudflare Workers, Pingflare is designed to stay within free tier limits:
+
+- Workers: 100,000 requests per day
+- D1: 100,000 write rows per day, 5 million read rows per day
+- Cron Triggers: minimum 1-minute interval
+
+With the default 90-day log retention and automatic cleanup on each cron run, write usage stays bounded proportional to the number of active monitors.
+
 ---
 
 ## 🐳 Deploy with Docker
 
 ```bash
-curl -O https://raw.githubusercontent.com/butialabs/pingflare/main/compose.yml
+curl -O https://raw.githubusercontent.com/butialabs/pingflare/main/docs/compose.yml
 
 # Edit the file and fill in ADMIN_USER, ADMIN_PASS, JWT_SECRET, ENCRYPTION_KEY
 
@@ -78,24 +84,14 @@ docker compose up -d
 
 Open `http://localhost:3000`.
 
-### Environment variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `ADMIN_USER` | Yes | — | Dashboard username |
-| `ADMIN_PASS` | Yes | — | Dashboard password |
-| `JWT_SECRET` | Yes | — | JWT signing key, min 32 chars |
-| `ENCRYPTION_KEY` | Yes | — | AES-GCM key for notification credentials, min 32 chars |
-
-> Mount a volume at `/data` to persist the database
-
 ---
 
 ## ✈️ Deploy on Fly.io
 
 ```bash
-fly launch --name pingflare
+curl -O https://raw.githubusercontent.com/butialabs/pingflare/main/docs/fly.toml
 fly volumes create pingflare_data --size 1 --region iad
+fly launch --name pingflare
 
 fly secrets set \
   ADMIN_USER=admin \
@@ -113,17 +109,3 @@ fly deploy
 - [LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md)
 - [LOCALES.md](docs/LOCALES.md)
 - [API.md](docs/API.md)
-
----
-
-## Cloudflare Free Tier Limits
-
-When running on Cloudflare Workers, Pingflare is designed to stay within free tier limits:
-
-- Workers: 100,000 requests per day
-- D1: 100,000 write rows per day, 5 million read rows per day
-- Cron Triggers: minimum 1-minute interval
-
-With the default 90-day log retention and automatic cleanup on each cron run, write usage stays bounded proportional to the number of active monitors.
-
-> When running in Docker mode, there are no such limits — SQLite has no row quotas and the cron runs on the same Node.js process.
