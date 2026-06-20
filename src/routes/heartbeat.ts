@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { eq } from 'drizzle-orm'
-import { getDb, heartbeatTokens, monitors, statusLogs, alertState } from '../db'
+import { getDbContext } from '../db'
 import { processAlert, getLocale } from '../services/alert-manager'
 import { msgHeartbeatReceived } from '../notifications/messages'
 import type { Env } from '../index'
@@ -9,7 +9,8 @@ import type { Env } from '../index'
 const router = new Hono<{ Bindings: Env }>()
 
 async function handleHeartbeat(c: Context<{ Bindings: Env }>) {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { heartbeatTokens, monitors, statusLogs, alertState } = tables
   const token = c.req.param('token')!
   const now = Math.floor(Date.now() / 1000)
 
@@ -25,7 +26,7 @@ async function handleHeartbeat(c: Context<{ Bindings: Env }>) {
 
   if (!monitor || !monitor.active) return c.json({ error: 'Monitor not active' }, 400)
 
-  const locale = await getLocale(db)
+  const locale = await getLocale(db, tables)
   const receivedMsg = msgHeartbeatReceived(locale)
 
   await db.update(heartbeatTokens)
@@ -41,7 +42,7 @@ async function handleHeartbeat(c: Context<{ Bindings: Env }>) {
     checkedAt: now,
   })
 
-  await processAlert({ db, monitor, status: 'up', message: receivedMsg })
+  await processAlert({ db, tables, monitor, status: 'up', message: receivedMsg })
 
   await db.update(alertState)
     .set({ consecutiveMissed: 0, alertSentAt: null, consecutiveAlerts: 0, surgePausedUntil: null })

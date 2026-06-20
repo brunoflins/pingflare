@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq, desc, and, gte, count, sql } from 'drizzle-orm'
-import { getDb, statusLogs, incidents, monitors } from '../db'
+import { getDbContext } from '../db'
 import { requireAuth } from '../middleware/auth'
 import type { Env } from '../index'
 
@@ -8,7 +8,8 @@ const router = new Hono<{ Bindings: Env }>()
 router.use('*', requireAuth)
 
 router.get('/:id/logs', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusLogs } = tables
   const id = c.req.param('id')
   const hoursParam = c.req.query('hours')
   const hours = hoursParam !== undefined ? Number(hoursParam) : null
@@ -29,14 +30,16 @@ router.get('/:id/logs', async (c) => {
 })
 
 router.get('/:id/check-count', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusLogs } = tables
   const id = c.req.param('id')
   const [{ total }] = await db.select({ total: count() }).from(statusLogs).where(eq(statusLogs.monitorId, id))
   return c.json({ count: total })
 })
 
 router.get('/:id/incidents', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { incidents } = tables
   const id = c.req.param('id')
   const limit = Number(c.req.query('limit') ?? 50)
 
@@ -50,7 +53,8 @@ router.get('/:id/incidents', async (c) => {
 })
 
 router.get('/:id/uptime', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusLogs } = tables
   const id = c.req.param('id')
   const days = Number(c.req.query('days') ?? 90)
   const since = Math.floor(Date.now() / 1000) - days * 86400
@@ -68,7 +72,8 @@ router.get('/:id/uptime', async (c) => {
 })
 
 router.get('/:id/daily', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusLogs, monitors } = tables
   const id = c.req.param('id')
   const days = Number(c.req.query('days') ?? 90)
   const monitor = await db.query.monitors.findFirst({ where: eq(monitors.id, id) })

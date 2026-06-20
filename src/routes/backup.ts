@@ -1,15 +1,5 @@
 import { Hono } from 'hono'
-import {
-  getDb,
-  monitors,
-  notificationChannels,
-  statusPages,
-  statusPageMonitors,
-  monitorNotifications,
-  settings,
-  heartbeatTokens,
-  alertState,
-} from '../db'
+import { getDbContext } from '../db'
 import { requireAuth } from '../middleware/auth'
 import type { Env } from '../index'
 
@@ -19,7 +9,8 @@ const router = new Hono<{ Bindings: Env }>()
 router.use('*', requireAuth)
 
 router.get('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors, notificationChannels, statusPages, statusPageMonitors, monitorNotifications, settings } = tables
 
   const settingsRows = await db.select().from(settings)
   const settingsMap: Record<string, string> = {}
@@ -78,7 +69,8 @@ router.post('/restore', async (c) => {
   if (body.settings !== undefined && (typeof body.settings !== 'object' || Array.isArray(body.settings)))
     return c.json({ error: 'Invalid settings field' }, 400)
 
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors, notificationChannels, statusPages, statusPageMonitors, monitorNotifications, settings, heartbeatTokens, alertState } = tables
   const now = Math.floor(Date.now() / 1000)
 
   await db.delete(monitors)

@@ -1,16 +1,16 @@
 import { eq } from 'drizzle-orm'
-import type { Db } from '../db'
+import type { Db, Tables } from '../db'
 
 let cachedLocale: string | null = null
 let cachedLocaleAt = 0
 const LOCALE_TTL_MS = 5 * 60 * 1000
-import { alertState, incidents, monitorNotifications, notificationChannels, settings } from '../db/schema'
-import type { Monitor, AlertState, NotificationChannel } from '../db/schema'
+import type { Monitor, NotificationChannel } from '../db/schema'
 import { sendNotification } from '../notifications'
 import type { NotificationPayload } from '../notifications'
 
 export interface AlertContext {
   db: Db
+  tables: Tables
   monitor: Monitor
   status: 'up' | 'down'
   message: string
@@ -19,7 +19,8 @@ export interface AlertContext {
 }
 
 export async function processAlert(ctx: AlertContext): Promise<void> {
-  const { db, monitor, status, message, responseTimeMs, encryptionKey } = ctx
+  const { db, tables, monitor, status, message, responseTimeMs, encryptionKey } = ctx
+  const { alertState } = tables
   const now = Math.floor(Date.now() / 1000)
 
   let state = await db.query.alertState.findFirst({
@@ -39,8 +40,8 @@ export async function processAlert(ctx: AlertContext): Promise<void> {
     }
   }
 
-  const channels = await getChannels(db, monitor.id)
-  const locale = await getLocale(db)
+  const channels = await getChannels(db, tables, monitor.id)
+  const locale = await getLocale(db, tables)
   const prevStatus = monitor.lastStatus
 
   if (status === 'down') {
@@ -67,7 +68,7 @@ export async function processAlert(ctx: AlertContext): Promise<void> {
     if (state.surgePausedUntil && now < state.surgePausedUntil) return
 
     if (prevStatus !== 'down') {
-      await openIncident(db, monitor.id, now)
+      await openIncident(db, tables, monitor.id, now)
       const payload: NotificationPayload = {
         type: 'alert',
         monitor: { id: monitor.id, name: monitor.name, type: monitor.type, url: monitor.url },
@@ -136,7 +137,7 @@ export async function processAlert(ctx: AlertContext): Promise<void> {
     const orphanedIncident = !wasDown ? await getOpenIncident(db, monitor.id) : null
 
     if (wasDown || orphanedIncident) {
-      await closeIncident(db, monitor.id, now)
+      await closeIncident(db, tables, monitor.id, now)
       const payload: NotificationPayload = {
         type: 'recovery',
         monitor: { id: monitor.id, name: monitor.name, type: monitor.type, url: monitor.url },
@@ -150,7 +151,8 @@ export async function processAlert(ctx: AlertContext): Promise<void> {
   }
 }
 
-async function getChannels(db: Db, monitorId: string): Promise<NotificationChannel[]> {
+async function getChannels(db: Db, tables: Tables, monitorId: string): Promise<NotificationChannel[]> {
+  const { monitorNotifications, notificationChannels } = tables
   const rows = await db
     .select({ channel: notificationChannels })
     .from(monitorNotifications)
@@ -164,7 +166,8 @@ async function dispatchToChannels(channels: NotificationChannel[], payload: Noti
 }
 
 
-async function openIncident(db: Db, monitorId: string, now: number) {
+async function openIncident(db: Db, tables: Tables, monitorId: string, now: number) {
+  const { incidents } = tables
   await db.insert(incidents).values({
     id: crypto.randomUUID(),
     monitorId,
@@ -178,7 +181,8 @@ async function getOpenIncident(db: Db, monitorId: string) {
   })
 }
 
-async function closeIncident(db: Db, monitorId: string, now: number) {
+async function closeIncident(db: Db, tables: Tables, monitorId: string, now: number) {
+  const { incidents } = tables
   const incident = await getOpenIncident(db, monitorId)
   if (!incident) return
   await db.update(incidents)
@@ -186,8 +190,9 @@ async function closeIncident(db: Db, monitorId: string, now: number) {
     .where(eq(incidents.id, incident.id))
 }
 
-export async function getLocale(db: Db): Promise<string> {
+export async function getLocale(db: Db, tables: Tables): Promise<string> {
   if (cachedLocale && Date.now() - cachedLocaleAt < LOCALE_TTL_MS) return cachedLocale
+  const { settings } = tables
   const row = await db.query.settings.findFirst({ where: eq(settings.key, 'locale') })
   cachedLocale = row?.value ?? 'en'
   cachedLocaleAt = Date.now()

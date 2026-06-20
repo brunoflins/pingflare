@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
-import { getDb, notificationChannels, monitors, monitorNotifications } from '../db'
+import { eq, sql } from 'drizzle-orm'
+import { getDbContext } from '../db'
+import { insertIgnore } from '../db/upsert'
 import { requireAuth } from '../middleware/auth'
 import { sendNotification } from '../services/notifier'
 import { SENSITIVE_FIELDS, isEncryptedValue, encryptField } from '../utils'
@@ -39,13 +40,15 @@ async function encryptSensitiveFields(
 }
 
 router.get('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { notificationChannels } = tables
   const channels = await db.select().from(notificationChannels)
   return c.json(channels.map(sanitizeChannel))
 })
 
 router.get('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { notificationChannels } = tables
   const ch = await db.query.notificationChannels.findFirst({
     where: eq(notificationChannels.id, c.req.param('id')),
   })
@@ -54,7 +57,8 @@ router.get('/:id', async (c) => {
 })
 
 router.post('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { notificationChannels } = tables
   const body = await c.req.json()
   const id = crypto.randomUUID()
   const now = Math.floor(Date.now() / 1000)
@@ -79,7 +83,8 @@ router.post('/', async (c) => {
 })
 
 router.put('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { notificationChannels } = tables
   const id = c.req.param('id')
   const body = await c.req.json()
 
@@ -121,13 +126,15 @@ router.put('/:id', async (c) => {
 })
 
 router.delete('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { notificationChannels } = tables
   await db.delete(notificationChannels).where(eq(notificationChannels.id, c.req.param('id')))
   return c.json({ ok: true })
 })
 
 router.post('/:id/apply-all-monitors', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables, dialect } = await getDbContext(c.env)
+  const { notificationChannels, monitors, monitorNotifications } = tables
   const channelId = c.req.param('id')
 
   const ch = await db.query.notificationChannels.findFirst({
@@ -137,16 +144,19 @@ router.post('/:id/apply-all-monitors', async (c) => {
 
   const allMonitors = await db.select().from(monitors)
   for (const monitor of allMonitors) {
-    await db.insert(monitorNotifications)
-      .values({ monitorId: monitor.id, channelId })
-      .onConflictDoNothing()
+    await insertIgnore(
+      dialect,
+      db.insert(monitorNotifications).values({ monitorId: monitor.id, channelId }),
+      { monitorId: sql`monitor_id` },
+    )
   }
 
   return c.json({ ok: true, applied: allMonitors.length })
 })
 
 router.post('/:id/test', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { notificationChannels } = tables
   const ch = await db.query.notificationChannels.findFirst({
     where: eq(notificationChannels.id, c.req.param('id')),
   })

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
-import { getDb, monitors, heartbeatTokens, alertState, monitorNotifications, statusLogs, incidents } from '../db'
+import { getDbContext } from '../db'
 import { requireAuth } from '../middleware/auth'
 import type { Env } from '../index'
 
@@ -8,13 +8,15 @@ const router = new Hono<{ Bindings: Env }>()
 router.use('*', requireAuth)
 
 router.get('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors } = tables
   const rows = await db.select().from(monitors)
   return c.json(rows)
 })
 
 router.get('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors } = tables
   const monitor = await db.query.monitors.findFirst({
     where: eq(monitors.id, c.req.param('id')),
   })
@@ -23,7 +25,8 @@ router.get('/:id', async (c) => {
 })
 
 router.post('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors, alertState, heartbeatTokens, monitorNotifications } = tables
   const body = await c.req.json()
   const id = crypto.randomUUID()
   const now = Math.floor(Date.now() / 1000)
@@ -84,7 +87,8 @@ router.post('/', async (c) => {
 })
 
 router.put('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors, monitorNotifications } = tables
   const id = c.req.param('id')
   const body = await c.req.json()
   const now = Math.floor(Date.now() / 1000)
@@ -136,14 +140,16 @@ router.put('/:id', async (c) => {
 })
 
 router.delete('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors } = tables
   const id = c.req.param('id')
   await db.delete(monitors).where(eq(monitors.id, id))
   return c.json({ ok: true })
 })
 
 router.get('/:id/heartbeat-token', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { heartbeatTokens } = tables
   const token = await db.query.heartbeatTokens.findFirst({
     where: eq(heartbeatTokens.monitorId, c.req.param('id')),
   })
@@ -152,7 +158,8 @@ router.get('/:id/heartbeat-token', async (c) => {
 })
 
 router.post('/:id/heartbeat-token/regenerate', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { heartbeatTokens } = tables
   const id = c.req.param('id')
   const newToken = crypto.randomUUID()
   await db.update(heartbeatTokens)
@@ -162,7 +169,8 @@ router.post('/:id/heartbeat-token/regenerate', async (c) => {
 })
 
 router.post('/:id/reset-stats', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitors, statusLogs, incidents, alertState } = tables
   const id = c.req.param('id')
 
   const monitor = await db.query.monitors.findFirst({ where: eq(monitors.id, id) })
@@ -187,7 +195,8 @@ router.post('/:id/reset-stats', async (c) => {
 })
 
 router.get('/:id/channels', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { monitorNotifications } = tables
   const rows = await db.select()
     .from(monitorNotifications)
     .where(eq(monitorNotifications.monitorId, c.req.param('id')))

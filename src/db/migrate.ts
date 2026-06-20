@@ -1,11 +1,10 @@
 let migrated = false
 
-/** For use in tests only, resets the migration flag so a fresh in-memory DB can be initialized. */
 export function resetMigratedFlag(): void {
   migrated = false
 }
 
-const SCHEMA_SQL = `
+export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS monitors (
   id text PRIMARY KEY NOT NULL,
   name text NOT NULL,
@@ -153,6 +152,21 @@ CREATE TABLE IF NOT EXISTS incident_monitors (
 );
 `
 
+export const ALTER_STATEMENTS = [
+  `ALTER TABLE status_pages ADD COLUMN show_all_monitors integer DEFAULT false NOT NULL`,
+  `ALTER TABLE notification_channels ADD COLUMN is_default integer DEFAULT false NOT NULL`,
+  `ALTER TABLE monitors ADD COLUMN ssl_check_enabled integer DEFAULT false NOT NULL`,
+  `ALTER TABLE monitors ADD COLUMN ssl_status text DEFAULT 'unknown' NOT NULL`,
+  `ALTER TABLE monitors ADD COLUMN cache_booster integer DEFAULT false NOT NULL`,
+  `ALTER TABLE status_logs ADD COLUMN colo text`,
+  `ALTER TABLE status_logs ADD COLUMN country_code text`,
+  `ALTER TABLE status_logs ADD COLUMN origin_ip text`,
+  `ALTER TABLE monitors ADD COLUMN dns_hostname text`,
+  `ALTER TABLE monitors ADD COLUMN dns_record_type text DEFAULT 'A'`,
+  `ALTER TABLE monitors ADD COLUMN dns_resolver_url text`,
+  `ALTER TABLE monitors ADD COLUMN dns_expected_ip text`,
+]
+
 export async function ensureSchema(d1: D1Database): Promise<void> {
   if (migrated) return
   const statements = SCHEMA_SQL
@@ -161,21 +175,7 @@ export async function ensureSchema(d1: D1Database): Promise<void> {
     .filter(s => s.length > 0)
   await d1.batch(statements.map(s => d1.prepare(s)))
 
-  const alterStatements = [
-    `ALTER TABLE status_pages ADD COLUMN show_all_monitors integer DEFAULT false NOT NULL`,
-    `ALTER TABLE notification_channels ADD COLUMN is_default integer DEFAULT false NOT NULL`,
-    `ALTER TABLE monitors ADD COLUMN ssl_check_enabled integer DEFAULT false NOT NULL`,
-    `ALTER TABLE monitors ADD COLUMN ssl_status text DEFAULT 'unknown' NOT NULL`,
-    `ALTER TABLE monitors ADD COLUMN cache_booster integer DEFAULT false NOT NULL`,
-    `ALTER TABLE status_logs ADD COLUMN colo text`,
-    `ALTER TABLE status_logs ADD COLUMN country_code text`,
-    `ALTER TABLE status_logs ADD COLUMN origin_ip text`,
-    `ALTER TABLE monitors ADD COLUMN dns_hostname text`,
-    `ALTER TABLE monitors ADD COLUMN dns_record_type text DEFAULT 'A'`,
-    `ALTER TABLE monitors ADD COLUMN dns_resolver_url text`,
-    `ALTER TABLE monitors ADD COLUMN dns_expected_ip text`,
-  ]
-  for (const sql of alterStatements) {
+  for (const sql of ALTER_STATEMENTS) {
     try { await d1.prepare(sql).run() } catch { /* column already exists */ }
   }
 

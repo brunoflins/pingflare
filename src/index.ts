@@ -13,10 +13,13 @@ import backupRoutes from './routes/backup'
 import eventsRoutes from './routes/events'
 import { runCron } from './cron'
 import { requireAuth } from './middleware/auth'
-import { ensureSchema } from './db/migrate'
+import { getDbContext } from './db'
 
 export type Env = {
-  DB: D1Database
+  DB?: D1Database            // Cloudflare D1 binding (Workers default / Node D1Shim / tests)
+  HYPERDRIVE?: Hyperdrive    // Worker → external Postgres/MySQL
+  DATABASE_URL?: string      // connection string (postgres://, mysql://, libsql://, file:)
+  DB_DRIVER?: string         // optional explicit dialect override
   ASSETS: Fetcher
   ADMIN_USER: string
   ADMIN_PASS: string
@@ -27,7 +30,7 @@ export type Env = {
 const app = new Hono<{ Bindings: Env }>()
 
 app.use('*', async (c, next) => {
-  await ensureSchema(c.env.DB)
+  await getDbContext(c.env)
   await next()
 })
 

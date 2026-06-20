@@ -1,5 +1,6 @@
 import { eq, lt } from 'drizzle-orm'
-import { getDb, monitors, statusLogs, heartbeatTokens, settings } from './db'
+import { getDbContext } from './db'
+import type { Monitor, Tables } from './db'
 import { checkHttp, checkDns, checkPing } from './services/checker'
 import { checkHeartbeat } from './services/heartbeat-checker'
 import { processAlert, getLocale } from './services/alert-manager'
@@ -32,14 +33,15 @@ const RETENTION_INTERVAL_MS = 60 * 60 * 1000
 const CONCURRENCY = 10
 
 type CheckResult = {
-  monitor: typeof monitors.$inferSelect
-  logEntry: typeof statusLogs.$inferInsert
+  monitor: Monitor
+  logEntry: Tables['statusLogs']['$inferInsert']
   sslStatus?: string
   alertInput: { status: 'up' | 'down'; message: string; responseTimeMs?: number | null }
 }
 
 export async function runCron(env: Env): Promise<void> {
-  const db = getDb(env.DB)
+  const { db, tables } = await getDbContext(env)
+  const { monitors, statusLogs, heartbeatTokens, settings } = tables
   const now = Math.floor(Date.now() / 1000)
   const origin = await getWorkerOrigin()
 
@@ -53,7 +55,7 @@ export async function runCron(env: Env): Promise<void> {
   })
 
   if (Date.now() - lastRetentionCleanupAt > RETENTION_INTERVAL_MS) {
-    const retentionRow = await db.select().from(settings).where(eq(settings.key, 'retention_days')).get()
+    const [retentionRow] = await db.select().from(settings).where(eq(settings.key, 'retention_days')).limit(1)
     const retentionDays = retentionRow ? parseInt(retentionRow.value, 10) : 90
     const cutoff = now - retentionDays * 86400
     await db.delete(statusLogs).where(lt(statusLogs.checkedAt, cutoff))
@@ -62,7 +64,7 @@ export async function runCron(env: Env): Promise<void> {
 
   if (due.length === 0) return
 
-  const locale = await getLocale(db)
+  const locale = await getLocale(db, tables)
 
   const checkResults: CheckResult[] = []
 
@@ -191,6 +193,7 @@ export async function runCron(env: Env): Promise<void> {
       checkResults.slice(i, i + CONCURRENCY).map(r =>
         processAlert({
           db,
+          tables,
           monitor: r.monitor,
           status: r.alertInput.status,
           message: r.alertInput.message,

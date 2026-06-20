@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { jwtVerify } from 'jose'
-import { getDb, monitors } from '../db'
+import { getDbContext } from '../db'
 import type { Env } from '../index'
 
 const router = new Hono<{ Bindings: Env }>()
@@ -20,7 +20,8 @@ router.get('/', async (c) => {
     return c.json({ error: 'Invalid token' }, 401)
   }
 
-  const database = getDb(c.env.DB)
+  const { db: database, tables } = await getDbContext(c.env)
+  const { monitors } = tables
 
   return streamSSE(c, async (stream) => {
     let alive = true

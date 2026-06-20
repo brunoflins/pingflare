@@ -16,6 +16,12 @@ binding = "DB"
 database_name = "pingflare"
 migrations_dir = "drizzle"
 
+# External database:
+#   [[hyperdrive]]
+#   binding = "HYPERDRIVE"
+#   id = "<your-hyperdrive-config-id>"
+#   localConnectionString = "postgres://user:pass@localhost:5432/pingflare"
+
 [triggers]
 crons = [
   "* * * * *"

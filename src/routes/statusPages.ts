@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
-import { getDb, statusPages, statusPageMonitors } from '../db'
+import { getDbContext } from '../db'
 import { requireAuth } from '../middleware/auth'
 import { hashPassword } from '../utils'
 import type { Env } from '../index'
@@ -9,13 +9,15 @@ const router = new Hono<{ Bindings: Env }>()
 router.use('*', requireAuth)
 
 router.get('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPages } = tables
   const rows = await db.select().from(statusPages)
   return c.json(rows)
 })
 
 router.post('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPages, statusPageMonitors } = tables
   const body = await c.req.json()
   const id = crypto.randomUUID()
 
@@ -42,14 +44,16 @@ router.post('/', async (c) => {
 })
 
 router.get('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPages } = tables
   const page = await db.query.statusPages.findFirst({ where: eq(statusPages.id, c.req.param('id')) })
   if (!page) return c.json({ error: 'Not found' }, 404)
   return c.json(page)
 })
 
 router.put('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPages, statusPageMonitors } = tables
   const id = c.req.param('id')
   const body = await c.req.json()
   const existing = await db.query.statusPages.findFirst({ where: eq(statusPages.id, id) })
@@ -82,13 +86,15 @@ router.put('/:id', async (c) => {
 })
 
 router.delete('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPages } = tables
   await db.delete(statusPages).where(eq(statusPages.id, c.req.param('id')))
   return c.json({ ok: true })
 })
 
 router.get('/:id/monitors', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPageMonitors } = tables
   const rows = await db.select().from(statusPageMonitors)
     .where(eq(statusPageMonitors.pageId, c.req.param('id')))
   return c.json(rows.map(r => r.monitorId))

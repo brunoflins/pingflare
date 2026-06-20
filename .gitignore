@@ -4,7 +4,18 @@ frontend/build/
 frontend/.svelte-kit/
 .wrangler/
 dist/
+dist-server/
+coverage/
 *.local
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+/data/
+pingflare.db*
 .env
 .env.test
 .env.production

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq, desc, inArray } from 'drizzle-orm'
-import { getDb, incidentReports, incidentUpdates, incidentMonitors } from '../db'
+import { getDbContext } from '../db'
 import { requireAuth } from '../middleware/auth'
 import type { Env } from '../index'
 
@@ -8,7 +8,8 @@ const router = new Hono<{ Bindings: Env }>()
 router.use('*', requireAuth)
 
 router.get('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { incidentReports, incidentMonitors, incidentUpdates } = tables
   const rows = await db.select().from(incidentReports).orderBy(desc(incidentReports.startedAt)).limit(100)
   const enriched = await Promise.all(rows.map(async (inc) => {
     const links = await db.select().from(incidentMonitors).where(eq(incidentMonitors.incidentId, inc.id))
@@ -21,7 +22,8 @@ router.get('/', async (c) => {
 })
 
 router.post('/', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { incidentReports, incidentUpdates, incidentMonitors } = tables
   const body = await c.req.json()
   const id = crypto.randomUUID()
   const now = Math.floor(Date.now() / 1000)
@@ -54,7 +56,8 @@ router.post('/', async (c) => {
 })
 
 router.get('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { incidentReports, incidentUpdates, incidentMonitors } = tables
   const id = c.req.param('id')
   const incident = await db.query.incidentReports.findFirst({ where: eq(incidentReports.id, id) })
   if (!incident) return c.json({ error: 'Not found' }, 404)
@@ -66,7 +69,8 @@ router.get('/:id', async (c) => {
 })
 
 router.put('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { incidentReports, incidentMonitors } = tables
   const id = c.req.param('id')
   const body = await c.req.json()
   const now = Math.floor(Date.now() / 1000)
@@ -92,7 +96,8 @@ router.put('/:id', async (c) => {
 })
 
 router.post('/:id/updates', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { incidentReports, incidentUpdates } = tables
   const incidentId = c.req.param('id')
   const body = await c.req.json()
   const now = Math.floor(Date.now() / 1000)
@@ -116,7 +121,8 @@ router.post('/:id/updates', async (c) => {
 })
 
 router.delete('/:id', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { incidentReports } = tables
   await db.delete(incidentReports).where(eq(incidentReports.id, c.req.param('id')))
   return c.json({ ok: true })
 })

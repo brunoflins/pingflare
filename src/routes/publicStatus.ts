@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
 import { eq, desc, and, gte, inArray, sql } from 'drizzle-orm'
-import { getDb, statusPages, statusPageMonitors, monitors, statusLogs, incidents, incidentReports, incidentUpdates, incidentMonitors } from '../db'
+import { getDbContext } from '../db'
+import type { Db, Tables } from '../db'
 import { verifyPassword } from '../utils'
 import type { Env } from '../index'
 
 const router = new Hono<{ Bindings: Env }>()
 
 async function getDailyStats(
-  db: ReturnType<typeof getDb>,
+  db: Db,
+  statusLogs: Tables['statusLogs'],
   monitorIds: string[],
   since90d: number,
 ) {
@@ -25,7 +27,8 @@ async function getDailyStats(
 }
 
 router.get('/:slug', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPages, statusPageMonitors, monitors, statusLogs, incidentMonitors, incidentReports, incidentUpdates } = tables
   const slug = c.req.param('slug')
 
   const page = await db.query.statusPages.findFirst({ where: eq(statusPages.slug, slug) })
@@ -73,7 +76,7 @@ router.get('/:slug', async (c) => {
   const now = Math.floor(Date.now() / 1000)
   const since90d = now - 90 * 86400
 
-  const dailyRows = await getDailyStats(db, monitorIds, since90d)
+  const dailyRows = await getDailyStats(db, statusLogs, monitorIds, since90d)
 
   const daysByMonitor: Record<string, Record<string, { ups: number; total: number }>> = {}
   const uptimeByMonitor: Record<string, { ups: number; total: number }> = {}
@@ -137,7 +140,8 @@ router.get('/:slug', async (c) => {
 })
 
 router.get('/:slug/monitors/:monitorId', async (c) => {
-  const db = getDb(c.env.DB)
+  const { db, tables } = await getDbContext(c.env)
+  const { statusPages, statusPageMonitors, monitors, statusLogs, incidents } = tables
   const slug = c.req.param('slug')
   const monitorId = c.req.param('monitorId')
 
