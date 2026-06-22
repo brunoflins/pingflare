@@ -126,4 +126,4 @@ When running on Cloudflare Workers, Pingflare is designed to stay within free ti
 
 With the default 90-day log retention and automatic cleanup on each cron run, write usage stays bounded proportional to the number of active monitors.
 
-> When running in Docker mode, there are no such limits — SQLite has no row quotas and the cron runs on the same Node.js process.
+> When running in Docker mode, there are no such limits — SQLite has no row quotas and the cron runs on the same Node.js process..
